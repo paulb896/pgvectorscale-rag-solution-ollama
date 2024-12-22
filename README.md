@@ -1,6 +1,6 @@
-# Building a High-Performance RAG Solution with Pgvectorscale and Python
+# Building a High-Performance RAG Solution with Pgvectorscale, Python, and Ollama
 
-This tutorial will guide you through setting up and using `pgvectorscale` with Docker and Python, leveraging OpenAI's powerful `text-embedding-3-small` model for embeddings. You'll learn to build a cutting-edge RAG (Retrieval-Augmented Generation) solution, combining advanced retrieval techniques (including hybrid search) with intelligent answer generation based on the retrieved context. Perfect for AI engineers looking to enhance their projects with state-of-the-art vector search and generation capabilities with the power of PostgreSQL.
+This tutorial will guide you through setting up and using `pgvectorscale` with Docker and Python, leveraging the open source `mxbai-embed-large` model for embeddings. You'll learn to build a cutting-edge RAG (Retrieval-Augmented Generation) solution, combining advanced retrieval techniques (including hybrid search) with intelligent answer generation based on the retrieved context. Perfect for AI engineers looking to enhance their projects with state-of-the-art vector search and generation capabilities with the power of PostgreSQL.
 
 ## YouTube Tutorial
 You can watch the full tutorial here on [YouTube](https://youtu.be/hAdEuDBN57g).
@@ -30,14 +30,14 @@ Pgvectorscale Vector builds on top of [pgvector](https://github.com/pgvector/pgv
 
 - Docker
 - Python 3.7+
-- OpenAI API key
+- Ollama
 - PostgreSQL GUI client
 
 ## Steps
 
 1. Set up Docker environment
 2. Connect to the database using a PostgreSQL GUI client (I use TablePlus)
-3. Create a Python script to insert document chunks as vectors using OpenAI embeddings
+3. Create a Python script to insert document chunks as vectors using mxbai-embed-large embedding model (using Ollama).
 4. Create a Python function to perform similarity search
 
 ## Detailed Instructions
@@ -80,18 +80,67 @@ docker compose up -d
   - Password: password
   - Database: postgres
 
-### 3. Create a Python script to insert document chunks as vectors
+### 3. Set up Ollama
 
-See `insert_vectors.py` for the implementation. This script uses OpenAI's `text-embedding-3-small` model to generate embeddings.
+Install ollama locally or point to a managed ollama instance by setting OLLAMA_BASE_URL in the [app/.env](app/.env).
 
-### 4. Create a Python function to perform similarity search
+1. Optional if ollama is different than http://127.0.0.1:11434/:
 
-See `similarity_search.py` for the implementation. This script also uses OpenAI's `text-embedding-3-small` model for query embedding.
+```bash
+cp example.env .env
+```
+
+2. For linux based on the env config docs described [here](https://github.com/ollama/ollama/blob/main/docs/faq.md#setting-environment-variables-on-linux
+) edit /etc/systemd/system/ollama.service.d/override.conf or make sure the env vars are set, OLLAMA_HOST=0.0.0.0 and OLLAMA_ORIGINS=*:
+
+```
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0"
+Environment="OLLAMA_ORIGINS=*"
+
+systemctl daemon-reload
+systemctl restart ollama
+```
+
+3. Make sure ollama is running on http://127.0.0.1:11434/ (or by loading OLLAMA_BASE_URL), should return:
+
+```
+Ollama is running
+```
+
+4. Finally load the following models:
+
+```bash
+ollama pull llama3.1
+ollama pull mxbai-embed-large
+```
+
+### 4. Create a Python script to insert document chunks as vectors
+
+#### 4.1 Installing and running Python
+
+Download and install python from https://www.python.org/downloads/.
+
+Once Python is installed from the root directory of this project, run the following commands:
+
+```
+python3 -m venv ./venv
+source venv/bin/activate
+python3 -m pip install -r requirements.txt
+```
+
+#### 4.2 Running insert_vectors.py
+
+See `insert_vectors.py` for the implementation. This script uses the open source `mxbai-embed-large` model to generate embeddings.
+
+### 5. Create a Python function to perform similarity search
+
+See `similarity_search.py` for the implementation. This script also uses the open source `mxbai-embed-large` model for query embedding.
 
 ## Usage
 
 1. Create a copy of `example.env` and rename it to `.env`
-2. Open `.env` and fill in your OpenAI API key. Leave the database settings as is
+2. Open `.env` and fill in your TIMESCALE_SERVICE_URL if your postgres database is different than the default configs.
 3. Run the Docker container
 4. Install the required Python packages using `pip install -r requirements.txt`
 5. Execute `insert_vectors.py` to populate the database
@@ -139,3 +188,58 @@ When you get results from similarity_search:
 - Distances closer to 0 indicate high similarity.
 - Distances around 1 suggest little to no similarity.
 - Distances approaching 2 indicate opposite meanings (rare in practice).
+
+
+## Troubleshooting
+
+### Test Ollama
+
+Run the following curl command to see if ollama/llama3.1 is returning actual content:
+
+```bash
+curl -X POST "http://127.0.0.1:11434/api/chat" \
+-H "Content-Type: application/json" \
+-d '{
+  "model": "llama3.1",
+  "stream": false,
+  "messages": [
+    {
+      "role": "system",
+      "content": "# Role and Purpose\nYou are an AI assistant for an e-commerce FAQ system. Your task is to synthesize a coherent and helpful answer \nbased on the given question and relevant context retrieved from a knowledge database.\n\n# Guidelines:\n1. Provide a clear and concise answer to the question.\n2. Use only the information from the relevant context to support your answer.\n3. The context is retrieved based on cosine similarity, so some information might be missing or irrelevant.\n4. Be transparent when there is insufficient information to fully answer the question.\n5. Do not make up or infer information not present in the provided context.\n6. If you cannot answer the question based on the given context, clearly state that.\n7. Maintain a helpful and professional tone appropriate for customer service.\n8. Adhere strictly to company guidelines and policies by using only the provided knowledge base.\n\nReview the question from the user:\n"
+    },
+    {
+      "role": "user",
+      "content": "# User question:\nWhat are your shipping options?"
+    },
+    {
+      "role": "assistant",
+      "content": "# Retrieved information:\n[\n  {\n    \"content\": \"Question: What are your shipping options?\\nAnswer: We offer standard (3-5 business days) and express (1-2 business days) shipping options.\",\n    \"category\": \"Shipping\"\n  },\n  {\n    \"content\": \"Question: Do you offer international shipping?\\nAnswer: Yes, we ship to most countries worldwide. Shipping costs and delivery times vary by location.\",\n    \"category\": \"Shipping\"\n  },\n  {\n    \"content\": \"Question: How can I track my order?\\nAnswer: You can track your order by logging into your account and viewing the order status or using the tracking number sent to your email.\",\n    \"category\": \"Order Management\"\n  }\n]"
+    },
+    {
+      "role": "assistant",
+      "content": ""
+    }
+  ]
+}'
+```
+
+Should return something like:
+
+```json
+{
+  "model": "llama3.1",
+  "created_at": "2024-12-22T23:12:26.040267689Z",
+  "message": {
+    "role": "assistant",
+    "content": "# Answer:\nWe offer two shipping options:\n\n*   Standard shipping, which takes approximately 3-5 business days\n*   Express shipping, which takes approximately 1-2 business days\n\nIf you have any questions about shipping or would like to estimate delivery times for a specific location, please don't hesitate to contact us. We're here to help!"
+  },
+  "done_reason": "stop",
+  "done": true,
+  "total_duration": 63889551074,
+  "load_duration": 6111508585,
+  "prompt_eval_count": 359,
+  "prompt_eval_duration": 42337000000,
+  "eval_count": 73,
+  "eval_duration": 14540000000
+}
+```

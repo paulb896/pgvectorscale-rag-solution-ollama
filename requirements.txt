@@ -1,7 +1,10 @@
 pandas
-openai
-psycopg
+chromadb
+ollama
+psycopg2-binary
 python-dotenv
 timescale-vector
 instructor
 anthropic
+requests
+pydantic

@@ -1,64 +1,79 @@
 import logging
 import time
 from typing import Any, List, Optional, Tuple, Union
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 from config.settings import get_settings
-from openai import OpenAI
 from timescale_vector import client
-
+from ollama import embeddings
 
 class VectorStore:
     """A class for managing vector operations and database interactions."""
 
     def __init__(self):
-        """Initialize the VectorStore with settings, OpenAI client, and Timescale Vector client."""
+        """Initialize the VectorStore with the correct database settings and Timescale Vector client."""
         self.settings = get_settings()
-        self.openai_client = OpenAI(api_key=self.settings.openai.api_key)
-        self.embedding_model = self.settings.openai.embedding_model
-        self.vector_settings = self.settings.vector_store
+
+        self.embedding_model = self.settings.ollama.embedding_model
+
+        # Connection string for Timescale Vector client
         self.vec_client = client.Sync(
-            self.settings.database.service_url,
-            self.vector_settings.table_name,
-            self.vector_settings.embedding_dimensions,
-            time_partition_interval=self.vector_settings.time_partition_interval,
+            service_url = self.settings.database.service_url,
+            num_dimensions=self.settings.vector_store.embedding_dimensions,
+            table_name=self.settings.vector_store.table_name,
+            time_partition_interval=timedelta(days=1),
         )
 
     def get_embedding(self, text: str) -> List[float]:
         """
-        Generate embedding for the given text.
+        Generate an embedding for the given text.
 
         Args:
             text: The input text to generate an embedding for.
 
         Returns:
             A list of floats representing the embedding.
+
+        Raises:
+            RuntimeError: If embedding generation fails.
         """
         text = text.replace("\n", " ")
         start_time = time.time()
-        embedding = (
-            self.openai_client.embeddings.create(
-                input=[text],
+
+        try:
+            # Call Ollama's embeddings API
+            response = embeddings(
                 model=self.embedding_model,
+                prompt=text,
             )
-            .data[0]
-            .embedding
-        )
+            embedding = response["embedding"]
+        except Exception as e:
+            print(f"Failed to generate embedding: {e}")
+            raise RuntimeError("Embedding generation failed") from e
+
         elapsed_time = time.time() - start_time
-        logging.info(f"Embedding generated in {elapsed_time:.3f} seconds")
+        print(f"Embedding generated in {elapsed_time:.3f} seconds")
         return embedding
 
     def create_tables(self) -> None:
-        """Create the necessary tablesin the database"""
+        """
+        Create the necessary tables in the database.
+
+        Args:
+            embedding_dimensions: The dimensionality of the embeddings.
+        """
         self.vec_client.create_tables()
 
     def create_index(self) -> None:
-        """Create the StreamingDiskANN index to spseed up similarity search"""
-        self.vec_client.create_embedding_index(client.DiskAnnIndex())
+        """Create the StreamingDiskANN index to speed up similarity search."""
+        try:
+            self.vec_client.create_embedding_index(client.DiskAnnIndex())
+        except Exception:
+            print("Index already exists, skipping creation.")
 
     def drop_index(self) -> None:
-        """Drop the StreamingDiskANN index in the database"""
+        """Drop the StreamingDiskANN index in the database."""
         self.vec_client.drop_embedding_index()
 
     def upsert(self, df: pd.DataFrame) -> None:
@@ -67,12 +82,12 @@ class VectorStore:
 
         Args:
             df: A pandas DataFrame containing the data to insert or update.
-                Expected columns: id, metadata, contents, embedding
+            Expected columns: id, metadata, contents, embedding
         """
         records = df.to_records(index=False)
         self.vec_client.upsert(list(records))
         logging.info(
-            f"Inserted {len(df)} records into {self.vector_settings.table_name}"
+            f"Inserted {len(df)} records into {self.settings.vector_store.table_name}"
         )
 
     def search(
@@ -87,41 +102,16 @@ class VectorStore:
         """
         Query the vector database for similar embeddings based on input text.
 
-        More info:
-            https://github.com/timescale/docs/blob/latest/ai/python-interface-for-pgvector-and-timescale-vector.md
-
         Args:
             query_text: The input text to search for.
             limit: The maximum number of results to return.
             metadata_filter: A dictionary or list of dictionaries for equality-based metadata filtering.
             predicates: A Predicates object for complex metadata filtering.
-                - Predicates objects are defined by the name of the metadata key, an operator, and a value.
-                - Operators: ==, !=, >, >=, <, <=
-                - & is used to combine multiple predicates with AND operator.
-                - | is used to combine multiple predicates with OR operator.
             time_range: A tuple of (start_date, end_date) to filter results by time.
             return_dataframe: Whether to return results as a DataFrame (default: True).
 
         Returns:
             Either a list of tuples or a pandas DataFrame containing the search results.
-
-        Basic Examples:
-            Basic search:
-                vector_store.search("What are your shipping options?")
-            Search with metadata filter:
-                vector_store.search("Shipping options", metadata_filter={"category": "Shipping"})
-        
-        Predicates Examples:
-            Search with predicates:
-                vector_store.search("Pricing", predicates=client.Predicates("price", ">", 100))
-            Search with complex combined predicates:
-                complex_pred = (client.Predicates("category", "==", "Electronics") & client.Predicates("price", "<", 1000)) | \
-                               (client.Predicates("category", "==", "Books") & client.Predicates("rating", ">=", 4.5))
-                vector_store.search("High-quality products", predicates=complex_pred)
-        
-        Time-based filtering:
-            Search with time range:
-                vector_store.search("Recent updates", time_range=(datetime(2024, 1, 1), datetime(2024, 1, 31)))
         """
         query_embedding = self.get_embedding(query_text)
 
@@ -141,6 +131,7 @@ class VectorStore:
             start_date, end_date = time_range
             search_args["uuid_time_filter"] = client.UUIDTimeRange(start_date, end_date)
 
+        # Fix: Use **search_args to pass keyword arguments
         results = self.vec_client.search(query_embedding, **search_args)
         elapsed_time = time.time() - start_time
 
@@ -171,7 +162,8 @@ class VectorStore:
 
         # Expand metadata column
         df = pd.concat(
-            [df.drop(["metadata"], axis=1), df["metadata"].apply(pd.Series)], axis=1
+            [df.drop(["metadata"], axis=1), df["metadata"].apply(pd.Series)]
+            , axis=1
         )
 
         # Convert id to string for better readability
@@ -194,16 +186,6 @@ class VectorStore:
 
         Raises:
             ValueError: If no deletion criteria are provided or if multiple criteria are provided.
-
-        Examples:
-            Delete by IDs:
-                vector_store.delete(ids=["8ab544ae-766a-11ef-81cb-decf757b836d"])
-
-            Delete by metadata filter:
-                vector_store.delete(metadata_filter={"category": "Shipping"})
-
-            Delete all records:
-                vector_store.delete(delete_all=True)
         """
         if sum(bool(x) for x in (ids, metadata_filter, delete_all)) != 1:
             raise ValueError(

@@ -55,11 +55,12 @@ class Synthesizer:
                 "role": "assistant",
                 "content": f"# Retrieved information:\n{context_str}",
             },
+            # Fix: Add an empty assistant message to avoid prompt issues
+            {"role": "assistant", "content": ""}
         ]
 
-        llm = LLMFactory("openai")
+        llm = LLMFactory("ollama")
         return llm.create_completion(
-            response_model=SynthesizedResponse,
             messages=messages,
         )
 

@@ -12,14 +12,10 @@ vec = VectorStore()
 
 relevant_question = "What are your shipping options?"
 results = vec.search(relevant_question, limit=3)
-
+print(f"\nResults for the question: '{relevant_question}' {results}")
 response = Synthesizer.generate_response(question=relevant_question, context=results)
 
-print(f"\n{response.answer}")
-print("\nThought process:")
-for thought in response.thought_process:
-    print(f"- {thought}")
-print(f"\nContext: {response.enough_context}")
+print(f"\n{response['message']['content']}")
 
 # --------------------------------------------------------------
 # Irrelevant question
@@ -31,11 +27,7 @@ results = vec.search(irrelevant_question, limit=3)
 
 response = Synthesizer.generate_response(question=irrelevant_question, context=results)
 
-print(f"\n{response.answer}")
-print("\nThought process:")
-for thought in response.thought_process:
-    print(f"- {thought}")
-print(f"\nContext: {response.enough_context}")
+print(f"\n{response['message']['content']}")
 
 # --------------------------------------------------------------
 # Metadata filtering
@@ -47,11 +39,7 @@ results = vec.search(relevant_question, limit=3, metadata_filter=metadata_filter
 
 response = Synthesizer.generate_response(question=relevant_question, context=results)
 
-print(f"\n{response.answer}")
-print("\nThought process:")
-for thought in response.thought_process:
-    print(f"- {thought}")
-print(f"\nContext: {response.enough_context}")
+print(f"\n{response['message']['content']}")
 
 # --------------------------------------------------------------
 # Advanced filtering using Predicates

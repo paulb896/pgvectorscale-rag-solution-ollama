@@ -1,8 +1,11 @@
 from datetime import datetime
 
 import pandas as pd
+import logging
 from database.vector_store import VectorStore
 from timescale_vector.client import uuid_from_time
+
+print("Inserting vectors into the VectorStore.")
 
 # Initialize VectorStore
 vec = VectorStore()
@@ -47,8 +50,10 @@ def prepare_record(row):
     )
 
 
+print("Step 1 - Records for insertion.")
 records_df = df.apply(prepare_record, axis=1)
 
+print(f"Prepared {len(records_df)} records for insertion.")
 # Create tables and insert data
 vec.create_tables()
 vec.create_index()  # DiskAnnIndex
